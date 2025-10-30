@@ -44,7 +44,7 @@ router = Router()
 
 @router.message(Command("start"))
 async def cmd_start(message, bot: Bot):
-    await message.reply("Hi! Send **send stuff** to get exclusive paid content.")
+    await message.reply("Hi! Send send stuff to get exclusive paid content.")
 
 
 @router.message(F.text.lower() == "send stuff")
@@ -70,11 +70,11 @@ async def send_paid_content(message, bot: Bot):
 
 @router.message()
 async def catch_all(message):
-    await message.reply("Try **/start** or **send stuff**!")
+    await message.reply("Try /start or send stuff!")
 
 
 # --------------------------------------------------------------------------- #
-# Special Event Handlers (Business & Purchase)
+# Special Event Handlers
 # --------------------------------------------------------------------------- #
 def register_special_handlers(dp: Dispatcher, bot: Bot):
     @dp.business_connection()
@@ -82,7 +82,6 @@ def register_special_handlers(dp: Dispatcher, bot: Bot):
         logging.info(
             f"Business connection: id={conn.id} user={conn.user.id} enabled={conn.is_enabled}"
         )
-        # Copy the ID and set BUSINESS_CONNECTION_ID in env to send via bot
 
     @dp.paid_media_purchased()
     async def handle_purchase(purchase: PaidMediaPurchased):
@@ -101,14 +100,13 @@ def register_special_handlers(dp: Dispatcher, bot: Bot):
 # --------------------------------------------------------------------------- #
 async def on_startup(app: web.Application):
     bot: Bot = app["bot"]
-    hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME") or os.getenv("WEBHOOK_HOST", "")
+    hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME")
     if not hostname:
-        logging.warning("No webhook hostname found. Set RENDER_EXTERNAL_HOSTNAME or WEBHOOK_HOST.")
+        logging.error("RENDER_EXTERNAL_HOSTNAME not set. Webhook cannot be configured.")
         return
     webhook_url = f"https://{hostname}{WEBHOOK_PATH}"
     await bot.set_webhook(url=webhook_url)
     logging.info(f"Webhook set: {webhook_url}")
-
 
 async def on_shutdown(app: web.Application):
     bot: Bot = app["bot"]
@@ -121,7 +119,6 @@ async def on_shutdown(app: web.Application):
 # Main Application
 # --------------------------------------------------------------------------- #
 async def main():
-    # Initialize bot with default properties (parse_mode, etc.)
     bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML)
@@ -130,31 +127,24 @@ async def main():
     dp.include_router(router)
     register_special_handlers(dp, bot)
 
-    # aiohttp web app
     app = web.Application()
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
 
-    # Pass bot to lifecycle handlers
     app["bot"] = bot
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
 
-    # Start server
     runner = web.AppRunner(app)
     await runner.setup()
     site = web.TCPSite(runner, WEBAPP_HOST, WEBAPP_PORT)
     await site.start()
     logging.info(f"Bot running on {WEBAPP_HOST}:{WEBAPP_PORT}")
 
-    # Keep alive
     try:
         await asyncio.Event().wait()
     finally:
         await runner.cleanup()
 
 
-# --------------------------------------------------------------------------- #
-# Entry Point
-# --------------------------------------------------------------------------- #
-if __name__ == "__main__":
+if name == "main":
     asyncio.run(main())
