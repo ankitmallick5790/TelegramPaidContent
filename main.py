@@ -44,7 +44,7 @@ router = Router()
 
 @router.message(Command("start"))
 async def cmd_start(message, bot: Bot):
-    await message.reply("Hi! Send send stuff to get exclusive paid content.")
+    await message.reply("Hi! Send **send stuff** to get exclusive paid content.")
 
 
 @router.message(F.text.lower() == "send stuff")
@@ -70,7 +70,7 @@ async def send_paid_content(message, bot: Bot):
 
 @router.message()
 async def catch_all(message):
-    await message.reply("Try /start or send stuff!")
+    await message.reply("Try **/start** or **send stuff**!")
 
 
 # --------------------------------------------------------------------------- #
@@ -107,6 +107,7 @@ async def on_startup(app: web.Application):
     webhook_url = f"https://{hostname}{WEBHOOK_PATH}"
     await bot.set_webhook(url=webhook_url)
     logging.info(f"Webhook set: {webhook_url}")
+
 
 async def on_shutdown(app: web.Application):
     bot: Bot = app["bot"]
@@ -146,5 +147,5 @@ async def main():
         await runner.cleanup()
 
 
-if name == "main":
+if __name__ == "__main__":
     asyncio.run(main())
