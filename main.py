@@ -141,5 +141,5 @@ async def main():
         await runner.cleanup()
 
 
-if name == "main":
+if __name__ == "__main__":
     asyncio.run(main())
