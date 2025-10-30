@@ -1,55 +1,40 @@
 import asyncio
 import logging
 import os
-from typing import Any
 
-from aiogram import Bot, Dispatcher, F, Router
-from aiogram.filters import Command
-from aiogram.types import (
-    InputPaidMediaPhoto,
-    BusinessConnection,
-    PaidMediaPurchased,
-)
-from aiogram.enums import ParseMode
+from aiogram import Bot, Dispatcher, F
 from aiogram.client.default import DefaultBotProperties
+from aiogram.enums import ParseMode
+from aiogram.types import InputPaidMediaPhoto
 from aiogram.webhook.aiohttp_server import SimpleRequestHandler
 from aiohttp import web
 
-# --------------------------------------------------------------------------- #
-# Logging
-# --------------------------------------------------------------------------- #
+# -------------------------- Setup --------------------------
 logging.basicConfig(level=logging.INFO)
-logging.getLogger("aiogram").setLevel(logging.DEBUG)
 
-# --------------------------------------------------------------------------- #
-# Environment Variables
-# --------------------------------------------------------------------------- #
 BOT_TOKEN = os.getenv("BOT_TOKEN")
 if not BOT_TOKEN:
-    raise ValueError("BOT_TOKEN must be set in the environment")
+    raise ValueError("BOT_TOKEN env var required")
 
-BUSINESS_CONNECTION_ID = os.getenv("BUSINESS_CONNECTION_ID", "")
-IMAGE_FILE_ID = os.getenv(
-    "IMAGE_FILE_ID", "AgACAgIAAxkBAAIB..."  # ← replace with real file_id
-)
+IMAGE_FILE_ID = os.getenv("IMAGE_FILE_ID")  # Must set this – your photo file_id
+if not IMAGE_FILE_ID:
+    raise ValueError("IMAGE_FILE_ID env var required")
+
 WEBHOOK_PATH = "/webhook"
 WEBAPP_HOST = "0.0.0.0"
 WEBAPP_PORT = int(os.getenv("PORT", "10000"))
 
-# --------------------------------------------------------------------------- #
-# Router & Message Handlers
-# --------------------------------------------------------------------------- #
-router = Router()
+# -------------------------- Bot & Dispatcher --------------------------
+bot = Bot(
+    token=BOT_TOKEN,
+    default=DefaultBotProperties(parse_mode=ParseMode.HTML)
+)
+dp = Dispatcher()
 
-
-@router.message(Command("start"))
-async def cmd_start(message, bot: Bot):
-    await message.reply("Hi! Send **send stuff** to get exclusive paid content.")
-
-
-@router.message(F.text.lower() == "send stuff")
-async def send_paid_content(message, bot: Bot):
-    logging.info(f"Sending paid media to user {message.from_user.id}")
+# -------------------------- Core Handler: Any DM → Send Paid Media --------------------------
+@dp.message(F.chat.type == "private")
+async def auto_send_paid_media(message):
+    logging.info(f"DM received from {message.from_user.id}: '{message.text[:50]}...'")
 
     paid_media = InputPaidMediaPhoto(media=IMAGE_FILE_ID)
 
@@ -57,81 +42,34 @@ async def send_paid_content(message, bot: Bot):
         await bot.send_paid_media(
             chat_id=message.chat.id,
             media=paid_media,
-            star_count=10,
-            payload="fan_unlock_001",
-            caption="Unlock this fan exclusive!",
-            business_connection_id=BUSINESS_CONNECTION_ID or None,
+            star_count=10,  # Cost to unlock
+            payload="dm_exclusive",  # Trackable ID for this media
+            caption="🔒 <b>Exclusive DM Unlock</b>\n\nPay 10 stars to view!",
         )
-        logging.info("Paid media sent")
-    except Exception as exc:
-        logging.error(f"Send failed: {exc}")
-        await message.reply(f"Error: {exc}")
+        logging.info(f"Paid media sent to {message.chat.id}")
+    except Exception as e:
+        logging.error(f"Send failed: {e}")
+        await message.reply("Oops! Try again later. 😅")
 
-
-@router.message()
-async def catch_all(message):
-    await message.reply("Try **/start** or **send stuff**!")
-
-
-# --------------------------------------------------------------------------- #
-# Special Event Handlers
-# --------------------------------------------------------------------------- #
-def register_special_handlers(dp: Dispatcher, bot: Bot):
-    @dp.business_connection()
-    async def handle_business_connection(conn: BusinessConnection):
-        logging.info(
-            f"Business connection: id={conn.id} user={conn.user.id} enabled={conn.is_enabled}"
-        )
-
-    @dp.paid_media_purchased()
-    async def handle_purchase(purchase: PaidMediaPurchased):
-        logging.info(
-            f"Purchase: user={purchase.user_id} stars={purchase.star_count} payload={purchase.payload}"
-        )
-        await bot.send_message(
-            chat_id=purchase.user_id,
-            text="Thanks for unlocking! More soon?",
-            business_connection_id=BUSINESS_CONNECTION_ID or None,
-        )
-
-
-# --------------------------------------------------------------------------- #
-# Webhook Lifecycle
-# --------------------------------------------------------------------------- #
-async def on_startup(app: web.Application):
-    bot: Bot = app["bot"]
+# -------------------------- Webhook Lifecycle --------------------------
+async def on_startup(app):
     hostname = os.getenv("RENDER_EXTERNAL_HOSTNAME")
-    if not hostname:
-        logging.error("RENDER_EXTERNAL_HOSTNAME not set. Webhook cannot be configured.")
-        return
-    webhook_url = f"https://{hostname}{WEBHOOK_PATH}"
-    await bot.set_webhook(url=webhook_url)
-    logging.info(f"Webhook set: {webhook_url}")
+    if hostname:
+        webhook_url = f"https://{hostname}{WEBHOOK_PATH}"
+        await bot.set_webhook(url=webhook_url)
+        logging.info(f"Webhook set: {webhook_url}")
+    else:
+        logging.warning("No RENDER_EXTERNAL_HOSTNAME – webhook not set (local dev?)")
 
-
-async def on_shutdown(app: web.Application):
-    bot: Bot = app["bot"]
+async def on_shutdown(app):
     await bot.delete_webhook(drop_pending_updates=True)
     await bot.session.close()
-    logging.info("Webhook removed and session closed")
+    logging.info("Bot shutdown complete")
 
-
-# --------------------------------------------------------------------------- #
-# Main Application
-# --------------------------------------------------------------------------- #
+# -------------------------- Main --------------------------
 async def main():
-    bot = Bot(
-        token=BOT_TOKEN,
-        default=DefaultBotProperties(parse_mode=ParseMode.HTML)
-    )
-    dp = Dispatcher()
-    dp.include_router(router)
-    register_special_handlers(dp, bot)
-
     app = web.Application()
     SimpleRequestHandler(dispatcher=dp, bot=bot).register(app, path=WEBHOOK_PATH)
-
-    app["bot"] = bot
     app.on_startup.append(on_startup)
     app.on_shutdown.append(on_shutdown)
 
@@ -139,13 +77,12 @@ async def main():
     await runner.setup()
     site = web.TCPSite(runner, WEBAPP_HOST, WEBAPP_PORT)
     await site.start()
-    logging.info(f"Bot running on {WEBAPP_HOST}:{WEBAPP_PORT}")
+    logging.info("🚀 Bot live – waiting for DMs...")
 
     try:
-        await asyncio.Event().wait()
+        await asyncio.Event().wait()  # Keep running forever
     finally:
         await runner.cleanup()
-
 
 if __name__ == "__main__":
     asyncio.run(main())
