@@ -30,51 +30,61 @@ if not FULL_WEBHOOK_URL.startswith("https://"):
 # Initialize the Application with token
 ptb_app = Application.builder().token(TOKEN).build()
 
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.message:
-        chat_type = update.message.chat.type
-        text = update.message.text.lower() if update.message.text else ""
-        user_id = update.effective_user.id
-        chat_id = update.effective_chat.id
-        
-        logger.info(f"Received message from {user_id} in {chat_type}: '{text}'")
-        
-        if chat_type == 'private':  # Restrict to private chats
-            if 'send' in text:
-                logger.info(f"Trigger matched for user {user_id} in private chat {chat_id}")
-                
-                # Send a paid photo requiring 22 Stars using your provided file ID
-                media = InputMediaPhoto(
-                    media='AgACAgUAAxkBAAMTaQU-em6X2nceQKfORhFTTOQPfvEAAkQNaxvRCShU60Ue_Do0OekBAAMCAAN4AAM2BA',  # Your file_id
-                    caption='Here you go! Unlock to view.'
+async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Check for business_message or message
+    msg = update.business_message or update.message
+    if not msg:
+        logger.warning("No message or business_message in update")
+        return
+    
+    chat_type = msg.chat.type
+    text = msg.text.lower() if msg.text else ""
+    user_id = msg.from_user.id if msg.from_user else update.effective_user.id
+    chat_id = update.effective_chat.id if hasattr(update, 'effective_chat') else msg.chat.id
+    
+    logger.info(f"Received {'business' if update.business_message else ''} message from {user_id} in {chat_type}: '{text}'")
+    
+    if chat_type == 'private':  # Restrict to private chats
+        if 'send' in text:
+            logger.info(f"Trigger matched for user {user_id} in private chat {chat_id}")
+            
+            # Send a paid photo requiring 22 Stars using your provided file ID
+            media = InputMediaPhoto(
+                media='AgACAgUAAxkBAAMTaQU-em6X2nceQKfORhFTTOQPfvEAAkQNaxvRCShU60Ue_Do0OekBAAMCAAN4AAM2BA',  # Your file_id
+                caption='Here you go! Unlock to view.'
+            )
+            try:
+                await context.bot.send_paid_media(
+                    chat_id=chat_id,
+                    media=media,
+                    stars=22,  # Number of Stars required to unlock
+                    payload='paid_photo_1'  # Optional unique identifier
                 )
-                try:
-                    await context.bot.send_paid_media(
-                        chat_id=chat_id,
-                        media=media,
-                        stars=22,  # Number of Stars required to unlock
-                        payload='paid_photo_1'  # Optional unique identifier
-                    )
-                    logger.info(f"Successfully sent paid photo to {user_id} in {chat_id}")
-                except Exception as e:
-                    logger.error(f"Error sending paid media to {user_id}: {e}")
-                    
-                    # Fallback: Test with non-paid send_photo (uncomment for debugging)
-                    # await context.bot.send_photo(chat_id=chat_id, photo=media.media, caption=media.caption)
-                    # logger.info(f"Fallback non-paid photo sent to {user_id}")
-            else:
-                logger.info(f"No trigger match for message '{text}' from {user_id}")
+                logger.info(f"Successfully sent paid photo to {user_id} in {chat_id}")
+            except Exception as e:
+                logger.error(f"Error sending paid media to {user_id}: {e}")
+                
+                # Fallback: Test with non-paid send_photo (uncomment for debugging)
+                # await context.bot.send_photo(chat_id=chat_id, photo=media.media, caption=media.caption)
+                # logger.info(f"Fallback non-paid photo sent to {user_id}")
         else:
-            logger.info(f"Ignoring non-private message from {user_id} in {chat_type}")
+            logger.info(f"No trigger match for message '{text}' from {user_id}")
+    else:
+        logger.info(f"Ignoring non-private message from {user_id} in {chat_type}")
 
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.message and update.message.photo and update.message.chat.type == 'private':
-        user_id = update.effective_user.id
-        chat_id = update.effective_chat.id
-        photo_file = update.message.photo[-1]  # Largest photo size
+async def handle_photo_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    # Check for business_message.photo or message.photo
+    msg = update.business_message or update.message
+    if not msg or not msg.photo:
+        return
+    
+    if msg.chat.type == 'private':
+        user_id = msg.from_user.id if msg.from_user else update.effective_user.id
+        chat_id = update.effective_chat.id if hasattr(update, 'effective_chat') else msg.chat.id
+        photo_file = msg.photo[-1]  # Largest photo size
         file_id = photo_file.file_id
         
-        logger.info(f"Photo received from {user_id} in private chat {chat_id}, file_id: {file_id}")
+        logger.info(f"{'Business ' if update.business_message else ''}Photo received from {user_id} in private chat {chat_id}, file_id: {file_id}")
         
         try:
             await context.bot.send_message(
@@ -85,9 +95,17 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         except Exception as e:
             logger.error(f"Error sending file ID to {user_id}: {e}")
 
-# Add handlers
-ptb_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-ptb_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))  # Handler for extracting file IDs
+# Add handlers for both message and business_message
+ptb_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_update))
+ptb_app.add_handler(MessageHandler(filters.PHOTO, handle_photo_update))
+# For business messages (if library supports; fallback via unified handler above)
+try:
+    from telegram.ext.filters import BusinessMessage
+    ptb_app.add_handler(MessageHandler(BusinessMessage.TEXT & ~filters.COMMAND, handle_update))
+    ptb_app.add_handler(MessageHandler(BusinessMessage.PHOTO, handle_photo_update))
+    logger.info("Business message filters added")
+except ImportError:
+    logger.info("Business filters not available; using unified handler")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
