@@ -60,8 +60,7 @@ async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 await context.bot.send_paid_media(
                     chat_id=chat_id,
                     media=media,
-                    star_count=22,  # Correct parameter: Number of Stars required to unlock
-                    payload='paid_photo_1',  # Optional unique identifier
+                    star_count=22,  # Number of Stars required to unlock
                     business_connection_id=business_connection_id  # Required for Business mode proxying
                 )
                 logger.info(f"Successfully sent paid photo to {user_id} in {chat_id}")
