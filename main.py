@@ -51,25 +51,25 @@ async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if 'send' in text:
             logger.info(f"Trigger matched for user {user_id} in private chat {chat_id}")
             
-            # Create InputPaidMediaPhoto directly with media string and caption
+            # Simple InputPaidMediaPhoto with file_id as media string (no caption here)
             paid_photo = InputPaidMediaPhoto(
-                media='AgACAgUAAxkBAAMTaQU-em6X2nceQKfORhFTTOQPfvEAAkQNaxvRCShU60Ue_Do0OekBAAMCAAN4AAM2BA',  # Your file_id as string
-                caption='Here you go! Unlock to view.'  # Caption directly on paid media
+                media='AgACAgUAAxkBAAMTaQU-em6X2nceQKfORhFTTOQPfvEAAkQNaxvRCShU60Ue_Do0OekBAAMCAAN4AAM2BA'  # Your file_id
             )
             
             try:
                 await context.bot.send_paid_media(
                     chat_id=chat_id,
-                    media=[paid_photo],  # List of InputPaidMediaPhoto (even for one)
-                    star_count=22,  # Number of Stars required to unlock (top-level method param)
-                    business_connection_id=business_connection_id  # Required for Business mode proxying
+                    media=[paid_photo],  # List (required, even for one photo)
+                    star_count=22,  # Stars to unlock
+                    caption='Here you go! Unlock to view.',  # Top-level caption for the message
+                    business_connection_id=business_connection_id  # Business proxy
                 )
                 logger.info(f"Successfully sent paid photo to {user_id} in {chat_id}")
             except Exception as e:
                 logger.error(f"Error sending paid media to {user_id}: {e}")
                 
-                # Fallback: Test with non-paid send_photo (uncomment for debugging)
-                # await context.bot.send_photo(chat_id=chat_id, photo=paid_photo.media, caption=paid_photo.caption)
+                # Fallback: Simple non-paid photo (uncomment to test)
+                # await context.bot.send_photo(chat_id=chat_id, photo=paid_photo.media)
                 # logger.info(f"Fallback non-paid photo sent to {user_id}")
         else:
             logger.info(f"No trigger match for message '{text}' from {user_id}")
@@ -88,51 +88,44 @@ async def handle_photo_update(update: Update, context: ContextTypes.DEFAULT_TYPE
         photo_file = msg.photo[-1]  # Largest photo size
         file_id = photo_file.file_id
         
-        # Extract business_connection_id for consistency (though not needed for reply)
         business_connection_id = update.business_message.business_connection_id if update.business_message else None
         
-        logger.info(f"{'Business ' if update.business_message else ''}Photo received from {user_id} in private chat {chat_id}, file_id: {file_id}")
+        logger.info(f"Photo received from {user_id} in private chat {chat_id}, file_id: {file_id}")
         
         try:
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"File ID: {file_id}\n\nUse this in your paid media code!",
-                business_connection_id=business_connection_id  # Proxy reply through account if business
+                text=f"File ID: {file_id}",
+                business_connection_id=business_connection_id
             )
             logger.info(f"File ID sent to {user_id}")
         except Exception as e:
             logger.error(f"Error sending file ID to {user_id}: {e}")
 
-# Add handlers for both message and business_message
+# Add handlers
 ptb_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_update))
 ptb_app.add_handler(MessageHandler(filters.PHOTO, handle_photo_update))
-# For business messages (if library supports; fallback via unified handler above)
 try:
     from telegram.ext.filters import BusinessMessage
     ptb_app.add_handler(MessageHandler(BusinessMessage.TEXT & ~filters.COMMAND, handle_update))
     ptb_app.add_handler(MessageHandler(BusinessMessage.PHOTO, handle_photo_update))
-    logger.info("Business message filters added")
 except ImportError:
-    logger.info("Business filters not available; using unified handler")
+    pass
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Startup: Set webhook with secure path
     try:
         await ptb_app.bot.set_webhook(FULL_WEBHOOK_URL)
         logger.info(f"Webhook set to {FULL_WEBHOOK_URL}")
     except BadRequest as e:
         logger.error(f"Failed to set webhook: {e}")
-        # Continue for manual setup if needed
     async with ptb_app:
         await ptb_app.initialize()
         await ptb_app.start()
         yield
-    # Shutdown
     await ptb_app.stop()
     await ptb_app.shutdown()
 
-# FastAPI app
 app = FastAPI(lifespan=lifespan)
 
 @app.post(WEBHOOK_PATH)
@@ -140,20 +133,15 @@ async def process_update(request: Request):
     logger.info("Incoming webhook update received")
     try:
         req = await request.json()
-        logger.info(f"Update JSON: {req}")  # Log full update for debugging (remove in prod for privacy)
         update = Update.de_json(req, ptb_app.bot)
         if update:
-            logger.info(f"Processing update ID: {update.update_id}")
             await ptb_app.process_update(update)
             logger.info(f"Update {update.update_id} processed successfully")
-        else:
-            logger.warning("No valid update in JSON")
         return Response(status_code=HTTPStatus.OK)
     except Exception as e:
         logger.error(f"Error processing update: {e}")
         return JSONResponse(status_code=HTTPStatus.INTERNAL_SERVER_ERROR, content={"error": str(e)})
 
-# Health check endpoint for Render
 @app.get("/health")
 async def health():
     return {"status": "healthy"}
