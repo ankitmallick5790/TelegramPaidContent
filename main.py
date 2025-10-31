@@ -43,9 +43,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             if 'send' in text:
                 logger.info(f"Trigger matched for user {user_id} in private chat {chat_id}")
                 
-                # Send a paid photo requiring 22 Stars (replace with your file_id after extraction)
+                # Send a paid photo requiring 22 Stars using your provided file ID
                 media = InputMediaPhoto(
-                    media='https://graph.org/file/c276c13a86c0fbfba5c51-dad1143620a2b7fe9f.jpg',  # Update to 'YOUR_FILE_ID' here
+                    media='AgACAgUAAxkBAAMTaQU-em6X2nceQKfORhFTTOQPfvEAAkQNaxvRCShU60Ue_Do0OekBAAMCAAN4AAM2BA',  # Your file_id
                     caption='Here you go! Unlock to view.'
                 )
                 try:
@@ -87,7 +87,7 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 # Add handlers
 ptb_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-ptb_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))  # New handler for photos
+ptb_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))  # Handler for extracting file IDs
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
