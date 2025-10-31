@@ -2,7 +2,7 @@ import os
 import logging
 from contextlib import asynccontextmanager
 from http import HTTPStatus
-from telegram import Update, InputMediaPhoto
+from telegram import Update, InputMediaPhoto, InputPaidMedia
 from telegram.ext import Application, MessageHandler, filters, ContextTypes
 from telegram.error import BadRequest
 from fastapi import FastAPI, Request, Response
@@ -51,16 +51,20 @@ async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         if 'send' in text:
             logger.info(f"Trigger matched for user {user_id} in private chat {chat_id}")
             
-            # Send a paid photo requiring 22 Stars using your provided file ID
-            media = InputMediaPhoto(
+            # Create InputPaidMedia for the photo (required for paid media)
+            photo_media = InputMediaPhoto(
                 media='AgACAgUAAxkBAAMTaQU-em6X2nceQKfORhFTTOQPfvEAAkQNaxvRCShU60Ue_Do0OekBAAMCAAN4AAM2BA',  # Your file_id
                 caption='Here you go! Unlock to view.'
             )
+            paid_media = InputPaidMedia(
+                media=photo_media,
+                star_count=22  # Number of Stars required to unlock
+            )
+            
             try:
                 await context.bot.send_paid_media(
                     chat_id=chat_id,
-                    media=media,
-                    star_count=22,  # Number of Stars required to unlock
+                    media=[paid_media],  # Must be a list of InputPaidMedia (even for one)
                     business_connection_id=business_connection_id  # Required for Business mode proxying
                 )
                 logger.info(f"Successfully sent paid photo to {user_id} in {chat_id}")
@@ -68,7 +72,7 @@ async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 logger.error(f"Error sending paid media to {user_id}: {e}")
                 
                 # Fallback: Test with non-paid send_photo (uncomment for debugging)
-                # await context.bot.send_photo(chat_id=chat_id, photo=media.media, caption=media.caption)
+                # await context.bot.send_photo(chat_id=chat_id, photo=photo_media, caption=photo_media.caption)
                 # logger.info(f"Fallback non-paid photo sent to {user_id}")
         else:
             logger.info(f"No trigger match for message '{text}' from {user_id}")
