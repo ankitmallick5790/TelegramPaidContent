@@ -31,24 +31,41 @@ if not FULL_WEBHOOK_URL.startswith("https://"):
 ptb_app = Application.builder().token(TOKEN).build()
 
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    if update.message and update.message.chat.type == 'private':  # Restrict to private chats
-        text = update.message.text.lower()
-        if 'send' in text:
-            # Send a paid photo requiring 22 Stars using your provided media URL
-            media = InputMediaPhoto(
-                media='https://graph.org/file/c276c13a86c0fbfba5c51-dad1143620a2b7fe9f.jpg',  # Your image URL (or Telegram file_id)
-                caption='Here you go! Unlock to view.'
-            )
-            try:
-                await context.bot.send_paid_media(
-                    chat_id=update.effective_chat.id,
-                    media=media,
-                    stars=22,  # Number of Stars required to unlock
-                    payload='paid_photo_1'  # Optional unique identifier
+    if update.message:
+        chat_type = update.message.chat.type
+        text = update.message.text.lower() if update.message.text else ""
+        user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
+        
+        logger.info(f"Received message from {user_id} in {chat_type}: '{text}'")
+        
+        if chat_type == 'private':  # Restrict to private chats
+            if 'send' in text:
+                logger.info(f"Trigger matched for user {user_id} in private chat {chat_id}")
+                
+                # Send a paid photo requiring 22 Stars using your provided media URL
+                media = InputMediaPhoto(
+                    media='https://graph.org/file/c276c13a86c0fbfba5c51-dad1143620a2b7fe9f.jpg',  # Replace with file_id after upload
+                    caption='Here you go! Unlock to view.'
                 )
-                logger.info(f"Sent paid photo to {update.effective_user.id}")
-            except Exception as e:
-                logger.error(f"Error sending media: {e}")
+                try:
+                    await context.bot.send_paid_media(
+                        chat_id=chat_id,
+                        media=media,
+                        stars=22,  # Number of Stars required to unlock
+                        payload='paid_photo_1'  # Optional unique identifier
+                    )
+                    logger.info(f"Successfully sent paid photo to {user_id} in {chat_id}")
+                except Exception as e:
+                    logger.error(f"Error sending paid media to {user_id}: {e}")
+                    
+                    # Fallback: Test with non-paid send_photo (uncomment for debugging)
+                    # await context.bot.send_photo(chat_id=chat_id, photo=media.media, caption=media.caption)
+                    # logger.info(f"Fallback non-paid photo sent to {user_id}")
+            else:
+                logger.info(f"No trigger match for message '{text}' from {user_id}")
+        else:
+            logger.info(f"Ignoring non-private message from {user_id} in {chat_type}")
 
 # Add handler
 ptb_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
@@ -75,12 +92,17 @@ app = FastAPI(lifespan=lifespan)
 
 @app.post(WEBHOOK_PATH)
 async def process_update(request: Request):
-    # Additional security: Verify the path includes the token (already handled by route)
+    logger.info("Incoming webhook update received")
     try:
         req = await request.json()
+        logger.info(f"Update JSON: {req}")  # Log full update for debugging (remove in prod for privacy)
         update = Update.de_json(req, ptb_app.bot)
         if update:
+            logger.info(f"Processing update ID: {update.update_id}")
             await ptb_app.process_update(update)
+            logger.info(f"Update {update.update_id} processed successfully")
+        else:
+            logger.warning("No valid update in JSON")
         return Response(status_code=HTTPStatus.OK)
     except Exception as e:
         logger.error(f"Error processing update: {e}")
