@@ -43,9 +43,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
             if 'send' in text:
                 logger.info(f"Trigger matched for user {user_id} in private chat {chat_id}")
                 
-                # Send a paid photo requiring 22 Stars using your provided media URL
+                # Send a paid photo requiring 22 Stars (replace with your file_id after extraction)
                 media = InputMediaPhoto(
-                    media='https://graph.org/file/c276c13a86c0fbfba5c51-dad1143620a2b7fe9f.jpg',  # Replace with file_id after upload
+                    media='https://graph.org/file/c276c13a86c0fbfba5c51-dad1143620a2b7fe9f.jpg',  # Update to 'YOUR_FILE_ID' here
                     caption='Here you go! Unlock to view.'
                 )
                 try:
@@ -67,8 +67,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         else:
             logger.info(f"Ignoring non-private message from {user_id} in {chat_type}")
 
-# Add handler
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if update.message and update.message.photo and update.message.chat.type == 'private':
+        user_id = update.effective_user.id
+        chat_id = update.effective_chat.id
+        photo_file = update.message.photo[-1]  # Largest photo size
+        file_id = photo_file.file_id
+        
+        logger.info(f"Photo received from {user_id} in private chat {chat_id}, file_id: {file_id}")
+        
+        try:
+            await context.bot.send_message(
+                chat_id=chat_id,
+                text=f"File ID: {file_id}\n\nUse this in your paid media code!"
+            )
+            logger.info(f"File ID sent to {user_id}")
+        except Exception as e:
+            logger.error(f"Error sending file ID to {user_id}: {e}")
+
+# Add handlers
 ptb_app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+ptb_app.add_handler(MessageHandler(filters.PHOTO, handle_photo))  # New handler for photos
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
