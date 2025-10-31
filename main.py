@@ -42,6 +42,9 @@ async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     user_id = msg.from_user.id if msg.from_user else update.effective_user.id
     chat_id = update.effective_chat.id if hasattr(update, 'effective_chat') else msg.chat.id
     
+    # Extract business_connection_id if business message
+    business_connection_id = update.business_message.business_connection_id if update.business_message else None
+    
     logger.info(f"Received {'business' if update.business_message else ''} message from {user_id} in {chat_type}: '{text}'")
     
     if chat_type == 'private':  # Restrict to private chats
@@ -57,8 +60,9 @@ async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
                 await context.bot.send_paid_media(
                     chat_id=chat_id,
                     media=media,
-                    stars=22,  # Number of Stars required to unlock
-                    payload='paid_photo_1'  # Optional unique identifier
+                    star_count=22,  # Correct parameter: Number of Stars required to unlock
+                    payload='paid_photo_1',  # Optional unique identifier
+                    business_connection_id=business_connection_id  # Required for Business mode proxying
                 )
                 logger.info(f"Successfully sent paid photo to {user_id} in {chat_id}")
             except Exception as e:
@@ -84,12 +88,16 @@ async def handle_photo_update(update: Update, context: ContextTypes.DEFAULT_TYPE
         photo_file = msg.photo[-1]  # Largest photo size
         file_id = photo_file.file_id
         
+        # Extract business_connection_id for consistency (though not needed for reply)
+        business_connection_id = update.business_message.business_connection_id if update.business_message else None
+        
         logger.info(f"{'Business ' if update.business_message else ''}Photo received from {user_id} in private chat {chat_id}, file_id: {file_id}")
         
         try:
             await context.bot.send_message(
                 chat_id=chat_id,
-                text=f"File ID: {file_id}\n\nUse this in your paid media code!"
+                text=f"File ID: {file_id}\n\nUse this in your paid media code!",
+                business_connection_id=business_connection_id  # Proxy reply through account if business
             )
             logger.info(f"File ID sent to {user_id}")
         except Exception as e:
