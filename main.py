@@ -12,41 +12,43 @@ from fastapi.responses import JSONResponse
 from urllib.parse import urlparse
 import aiohttp
 
-# Enable logging
+# Logging setup
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Environment variables (set in Render or your env)
+# Environment variables for your deployment
 TOKEN = os.getenv("BOT_TOKEN")
 BASE_WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://telegrampaidcontent.onrender.com")
-AI_API_KEY = os.getenv("AI_API_KEY")  # Hugging Face token
+AI_API_KEY = os.getenv("AI_API_KEY")  # Your Grok API key starting with "xai-"
 DEFAULT_FILE_ID = os.getenv("DEFAULT_FILE_ID", "AgACAgUAAxkBAAMTaQU-em6X2nceQKfORhFTTOQPfvEAAkQNaxvRCShU60Ue_Do0OekBAAMCAAN4AAM2BA")
 STAR_COUNT = int(os.getenv("STAR_COUNT", "22"))
-COOLDOWN_TIME = int(os.getenv("COOLDOWN_TIME", "60"))
+COOLDOWN_TIME = int(os.getenv("COOLDOWN_TIME", "60"))  # seconds cooldown between user msgs
 
 if not TOKEN or not AI_API_KEY:
-    raise ValueError("BOT_TOKEN and AI_API_KEY required")
+    raise ValueError("BOT_TOKEN and AI_API_KEY are required environment variables")
 
 WEBHOOK_PATH = f"/webhook/{TOKEN}"
 FULL_WEBHOOK_URL = f"{BASE_WEBHOOK_URL.rstrip('/')}{WEBHOOK_PATH}"
 
 if not FULL_WEBHOOK_URL.startswith("https://"):
-    raise ValueError("WEBHOOK_URL must be https")
+    raise ValueError("WEBHOOK_URL must start with https://")
 
 ptb_app = Application.builder().token(TOKEN).build()
 
+# User session storage for messages and rate limit
 user_sessions = {}
 
 SYSTEM_PROMPT = """
 You are Kira Bloom, a playful 25yo OnlyFans model. Be flirty, teasing, and confident.
 Build rapport naturally.
-After 5-7 messages or if user shows interest in pics/nudes/content/uploads, decide to send media.
-Respond only in JSON with keys: 
-{ "response": "flirty reply text (short, <100 words)", 
+After 5-7 messages, or if the user shows interest in pics/nudes/content/uploads, decide to send media.
+Respond ONLY in JSON:
+{
+  "response": "flirty reply text (short, <100 words)",
   "action": "chat" or "send_media",
-  "content_type": "tease" or "nudes" (if send_media) }
-No explicit details, keep teasing and fun.
-Example: {"response": "Time for my secret pics! Unlocking now... 😏", "action": "send_media", "content_type": "nudes"}
+  "content_type": "tease" or "nudes" (if send_media)
+}
+No explicit content; keep teasing and fun.
 """
 
 async def generate_ai_response(user_text: str, user_id: int, history: list, msg_count: int) -> dict:
@@ -55,10 +57,10 @@ async def generate_ai_response(user_text: str, user_id: int, history: list, msg_
     last_time = session.get('last_time', 0)
     elapsed = current_time - last_time
 
-    logger.info(f"Cooldown check for {user_id}: {elapsed:.1f}s elapsed (threshold {COOLDOWN_TIME}s), msg count: {msg_count}")
+    logger.info(f"Cooldown check for {user_id}: {elapsed:.1f}s elapsed; threshold {COOLDOWN_TIME}s, msg count {msg_count}")
 
     if msg_count > 3 and elapsed < COOLDOWN_TIME:
-        logger.info(f"Cooldown active for {user_id}; sending cooldown response")
+        logger.info(f"Cooldown active for {user_id}; sending cooldown message")
         session['last_time'] = current_time
         user_sessions[user_id] = session
         return {"response": "Slow down, babe—let's savor this! What's next? 💋", "action": "chat", "content_type": ""}
@@ -72,40 +74,39 @@ async def generate_ai_response(user_text: str, user_id: int, history: list, msg_
     history_str = "\n".join([f"User: {h['user']}\nAI: {h['ai']}" for h in history[-6:]]) if history else ""
     full_prompt = f"{SYSTEM_PROMPT}\nHistory:\n{history_str}\nUser: {user_text}\nRespond in JSON only."
 
-    headers = {"Authorization": f"Bearer {AI_API_KEY}"}
+    headers = {
+        "Authorization": f"Bearer {AI_API_KEY}",
+        "Content-Type": "application/json"
+    }
     data = {
-        "inputs": full_prompt,
-        "model": "moonshotai/Kimi-K2-Thinking",  # or your preferred model
-        "options": {"use_cache": False}
+        "model": "grok-beta",
+        "messages": [
+            {"role": "system", "content": full_prompt},
+            {"role": "user", "content": user_text}
+        ],
+        "max_tokens": 150,
+        "temperature": 0.8
     }
 
     async with aiohttp.ClientSession() as session:
-        async with session.post(
-            "https://router.huggingface.co/hf-inference",
-            headers=headers,
-            json=data
-        ) as resp:
+        async with session.post("https://api.x.ai/v1/chat/completions", json=data, headers=headers) as resp:
             if resp.status == 200:
-                response = await resp.json()
-                generated_text = ""
-                if isinstance(response, list) and "generated_text" in response[0]:
-                    generated_text = response[0]["generated_text"]
-                else:
-                    generated_text = str(response)
-                logger.info(f"AI raw response for {user_id}: {generated_text[:100]}...")
+                result = await resp.json()
+                ai_text = result["choices"][0]["message"]["content"].strip()
+                logger.info(f"AI raw response for {user_id}: {ai_text[:100]}...")
                 try:
-                    parsed = json.loads(generated_text)
+                    parsed = json.loads(ai_text)
                     return {
-                        "response": parsed.get("response", generated_text),
+                        "response": parsed.get("response", ai_text),
                         "action": parsed.get("action", "chat"),
                         "content_type": parsed.get("content_type", "")
                     }
                 except json.JSONDecodeError:
-                    logger.warning("AI response JSON parse failed; sending raw")
-                    return {"response": generated_text, "action": "chat", "content_type": ""}
+                    logger.warning("Failed to parse AI JSON response; sending raw response")
+                    return {"response": ai_text, "action": "chat", "content_type": ""}
             else:
                 logger.error(f"AI API error {resp.status}: {await resp.text()}")
-                return {"response": "Oops, AI is a bit busy. Try again? 😘", "action": "chat", "content_type": ""}
+                return {"response": "Oops, AI is busy now. Try again? 😘", "action": "chat", "content_type": ""}
 
 async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg = update.business_message or update.message
@@ -145,13 +146,13 @@ async def handle_update(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 caption=f"Unlock exclusive just for you! 😘",
                 business_connection_id=business_connection_id
             )
-            logger.info(f"Auto-sent paid media to user {user_id}")
+            logger.info(f"Paid media sent to user {user_id}")
         except Exception as e:
-            logger.error(f"Error auto-sending paid media: {e}")
+            logger.error(f"Error sending paid media: {e}")
             try:
                 await context.bot.send_message(chat_id=chat_id, text=ai_output["response"], business_connection_id=business_connection_id)
             except Exception as e2:
-                logger.error(f"Error sending fallback AI response: {e2}")
+                logger.error(f"Fallback AI message sending failed: {e2}")
     else:
         try:
             await context.bot.send_message(chat_id=chat_id, text=ai_output["response"], business_connection_id=business_connection_id)
